@@ -1,0 +1,11 @@
+> Cool toy you made there. I think each individual test should run a
+> little longer though as the results "jump around" quite a bit (upto 1
+> percent) between runs.
+> 
+> With "DEN" bit the screen flashes quite a bit. Might I suggest pausing
+> the test for maybe 2 seconds between each complete run to give some time
+> to read the screen without it flashing constantly.
+> 
+> Maybe you can add an option to disable the framebuffer on chameleon.
+> Should boost the write speed to memory a bit (you can do it like DEN bit
+> so you still get screen updates between runs). 
