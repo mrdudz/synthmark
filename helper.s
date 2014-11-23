@@ -68,4 +68,63 @@ _dtvturbooff:
         .byte $32,$ee ;sac $ee
         rts
 
+ptr     = $fc
 
+        .P02
+        .import _vic_pal
+        .export _set_vic_pal
+_set_vic_pal:
+        sei
+p1:
+        lda $d012
+p2:
+        cmp $d012
+        beq p2
+        bmi p1
+
+        ldx #1	; PAL
+        cmp #55
+        beq pal
+        dex		; NTSC
+pal:
+        stx _vic_pal
+        cli
+        rts
+
+        .P816
+        .import _ram_banks
+        .export _set_ram_banks
+_set_ram_banks:
+        ; test all banks
+        stz ptr + 0
+        lda #$04
+        sta ptr + 1
+        stz ptr + 2
+
+bank:
+        ; write data
+        ldy #0
+l0:
+        tya
+        sta [ptr],y
+        iny
+        bne l0
+
+        ; compare
+        ldy #0
+l1:
+        tya
+        cmp [ptr],y
+        bne error
+        iny
+        bne l1
+
+        ; ok, next bank
+        inc ptr + 2
+        bne bank
+error:
+        lda ptr + 2
+        sta _ram_banks
+        rts
+
+        .P02

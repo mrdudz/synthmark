@@ -3,10 +3,16 @@
 
 #include <conio.h>
 #include <string.h>
+#include <6502.h>
+
+unsigned char cpu_type = 0;
+unsigned char ram_banks = 1;
+unsigned char vic_pal = 0;
 
 unsigned char screenoff = 0;
 unsigned char dtvturbo = 0;
 unsigned char c128turbo = 0;
+unsigned char scpumode = 1; // default, none, full
 unsigned char *ptr;
 
 void teststart(void)
@@ -42,6 +48,9 @@ extern void loadzpage(void);
 extern void dtvturboon(void);
 extern void dtvturbooff(void);
 
+extern void set_vic_pal(void);
+extern void set_ram_banks(void);
+
 unsigned int dotest(void)
 {
     static unsigned int res;
@@ -60,6 +69,25 @@ unsigned int dotest(void)
     if (c128turbo) {
         asm("ldy #$01");
         asm("sty $d030");
+    }
+
+    if (cpu_type == CPU_65816) {
+        // scpumode
+        asm("sty $d07e");
+        if (scpumode == 0) {
+            asm("sty $d077"); // V1 default (no optimization)
+            asm("ldy #%%11000001");
+            asm("sty $d0b3"); // V2 default (optimize zp and stack)
+        } else if (scpumode == 1) {
+            asm("sty $d077"); // V1 (no optimization)
+            asm("ldy #%%11000000");
+            asm("sty $d0b3"); // V2 (no optimization)
+        } else {
+            asm("sty $d076"); // V1 (BASIC optimization)
+            asm("ldy #%%10000100");
+            asm("sty $d0b3"); // V2 (Full optimization)
+        }
+        asm("sty $d07f");
     }
 
     asm("ldy #$7f");
@@ -88,6 +116,16 @@ unsigned int dotest(void)
         asm("ldy #$00");
         asm("sty $d030");
     }
+
+    if (cpu_type == CPU_65816) {
+        // scpumode
+        asm("sty $d07e");
+        asm("sty $d077"); // V1 default (no optimization)
+        asm("ldy #%%11000001");
+        asm("sty $d0b3"); // V2 default (optimize zp and stack)
+        asm("sty $d07f");
+    }
+
     asm("ldy #$1b");
     asm("sty $d011");
     asm("ldy #$36");
@@ -147,6 +185,7 @@ unsigned int testcodezp(void)
 {
     memcpy(ptr, zpcode, 0xfc);
     ptr += 0xfc;
+    return 0;
 }
 
 // 4000 * 2 cycles
@@ -192,7 +231,7 @@ unsigned int teststore(void)
     unsigned int a2;
     unsigned int i;
     for (i = 0; i < 2000; ++i) {
-        a2 = 0xff00 + (i & 0x00ff);
+        a2 = 0xfe00 + (i & 0x00ff);
         *ptr++ = 0x8d; // sta abs
         *ptr++ = a2 & 0xff; // lo
         *ptr++ = (a2 >> 8) & 0xff; // hi
@@ -207,7 +246,7 @@ unsigned int testmove(void)
     unsigned int a1, a2;
     for (i = 0; i < 1000; ++i) {
         a1 = 0x1000 + (i & 0x0fff);
-        a2 = 0xff00 + (i & 0x00ff);
+        a2 = 0xfe00 + (i & 0x00ff);
         *ptr++ = 0xad; // lda abs
         *ptr++ = a1 & 0xff; // lo
         *ptr++ = (a1 >> 8) & 0xff; // hi
@@ -224,7 +263,7 @@ unsigned int testinc(void)
     unsigned int a2;
     unsigned int i;
     for (i = 0; i < 2000; ++i) {
-        a2 = 0xff00 + (i & 0x00ff);
+        a2 = 0xfe00 + (i & 0x00ff);
         *ptr++ = 0xee; // inc abs
         *ptr++ = a2 & 0xff; // lo
         *ptr++ = (a2 >> 8) & 0xff; // hi
@@ -389,6 +428,56 @@ unsigned int testincio(void)
     return 0;
 }
 
+// 2000 * 5 cycles
+unsigned int testloadlong(void)
+{
+    unsigned long a1;
+    unsigned int i;
+    for (i = 0; i < 2000; ++i) {
+        a1 = 0x020000 + i;
+        *ptr++ = 0xaf; // lda abs long
+        *ptr++ = a1 & 0xff; // lo
+        *ptr++ = (a1 >> 8) & 0xff; // hi
+        *ptr++ = (a1 >> 16) & 0xff; // bank
+    }
+    return 0;
+}
+
+// 2000 * 5 cycles
+unsigned int teststorelong(void)
+{
+    unsigned long a2;
+    unsigned int i;
+    for (i = 0; i < 2000; ++i) {
+        a2 = 0x030000 + i;
+        *ptr++ = 0x8f; // sta abs long
+        *ptr++ = a2 & 0xff; // lo
+        *ptr++ = (a2 >> 8) & 0xff; // hi
+        *ptr++ = (a2 >> 16) & 0xff; // bank
+    }
+    return 0;
+}
+
+// 1000 * 10 cycles
+unsigned int testmovelong(void)
+{
+    unsigned int i;
+    unsigned long a1, a2;
+    for (i = 0; i < 1000; ++i) {
+        a1 = 0x020000 + i;
+        a2 = 0x030000 + i;
+        *ptr++ = 0xaf; // lda abs long
+        *ptr++ = a1 & 0xff; // lo
+        *ptr++ = (a1 >> 8) & 0xff; // hi
+        *ptr++ = (a1 >> 16) & 0xff; // bank
+        *ptr++ = 0x8f; // sta abs long
+        *ptr++ = a2 & 0xff; // lo
+        *ptr++ = (a2 >> 8) & 0xff; // hi
+        *ptr++ = (a2 >> 16) & 0xff; // bank
+    }
+    return 0;
+}
+
 void fixscreen (void)
 {
     memset((unsigned char*)0xd800, 14, 0x3e8);
@@ -399,6 +488,8 @@ void fixscreen (void)
 
 typedef struct
 {
+    unsigned char cpu_type;
+    unsigned char ram_banks;
     char *name;
     unsigned int (*generator)(void);
     unsigned int cycles;
@@ -408,27 +499,32 @@ typedef struct
 
 TESTINFO testinfo[] =
 {
-    {"nop", testnops, 8000, 8},
-    {"register ops", testregops, 12000, 1},
-    {"function calls", testjsr, 24000, 1},
-    {"jumps and branches", testjmp, 8000, 1},
-    {"code in zeropage", testcodezp, 20696 / 2, 1},
-    {"ram load", testload, 8000, 1},
-    {"ram store", teststore, 8000, 1},
-    {"ram move", testmove, 8000, 1},
-    {"ram rmw", testinc, 12000, 1},
-    {"zeropage load", testloadzp, 6000, 1},
-    {"zeropage store", teststorezp, 6000, 1},
-    {"zeropage move", testmovezp, 6000, 1},
-    {"zeropage rmw", testinczp, 10000, 1},
-    {"color ram load", testloadcolram, 8000, 4},
-    {"color ram store", teststorecolram, 8000, 4},
-    {"color ram move", testmovecolram, 8000, 4},
-    {"color ram rmw", testinccolram, 12000, 8},
-    {"i/o load", testloadio, 8000, 4},
-    {"i/o store", teststoreio, 8000, 4},
-    {"i/o rmw", testincio, 12000, 8},
-    {NULL, NULL},
+    // Any cpu
+    {CPU_6502, 1, "nop", testnops, 8000, 8},
+    {CPU_6502, 1, "register ops", testregops, 12000, 1},
+    {CPU_6502, 1, "function calls", testjsr, 24000, 1},
+    {CPU_6502, 1, "jumps and branches", testjmp, 8000, 1},
+    {CPU_6502, 1, "code in zeropage", testcodezp, 20696 / 2, 1},
+    {CPU_6502, 1, "ram load", testload, 8000, 1},
+    {CPU_6502, 1, "ram store", teststore, 8000, 1},
+    {CPU_6502, 1, "ram move", testmove, 8000, 1},
+    {CPU_6502, 1, "ram rmw", testinc, 12000, 1},
+    {CPU_6502, 1, "zeropage load", testloadzp, 6000, 1},
+    {CPU_6502, 1, "zeropage store", teststorezp, 6000, 1},
+    {CPU_6502, 1, "zeropage move", testmovezp, 6000, 1},
+    {CPU_6502, 1, "zeropage rmw", testinczp, 10000, 1},
+    {CPU_6502, 1, "color ram load", testloadcolram, 8000, 4},
+    {CPU_6502, 1, "color ram store", teststorecolram, 8000, 4},
+    {CPU_6502, 1, "color ram move", testmovecolram, 8000, 4},
+    {CPU_6502, 1, "color ram rmw", testinccolram, 12000, 8},
+    {CPU_6502, 1, "i/o load", testloadio, 8000, 4},
+    {CPU_6502, 1, "i/o store", teststoreio, 8000, 4},
+    {CPU_6502, 1, "i/o rmw", testincio, 12000, 8},
+    // 65816 only, exclude from weighted rating
+    {CPU_65816, 4, "long load", testloadlong, 10000, 0},
+    {CPU_65816, 4, "long store", teststorelong, 10000, 0},
+    {CPU_65816, 4, "long move", testmovelong, 10000, 0},
+    {0, 0, NULL, NULL, 0, 0},
 };
 
 void printpercent(unsigned int res, unsigned int cycles)
@@ -451,8 +547,8 @@ void printpercent(unsigned int res, unsigned int cycles)
 
 void printinfo(unsigned char n, unsigned int res)
 {
-    gotoxy(0,n + 2); cclear(40);
-    gotoxy(0,n + 2); cprintf("%-20s %5u   ", testinfo[n].name, res);
+    gotoxy(0,n + 1); cclear(40);
+    gotoxy(0,n + 1); cprintf("%-20s %5u   ", testinfo[n].name, res);
     printpercent(res, testinfo[n].cycles * 2);
     fixscreen();
 }
@@ -469,8 +565,10 @@ void printrating(void)
 
     n = 0;
     while (testinfo[n].generator) {
-        allresult += testinfo[n].result / testinfo[n].weight;
-        allcycles += (testinfo[n].cycles * 2) / testinfo[n].weight;
+        if (testinfo[n].weight > 0) {
+            allresult += testinfo[n].result / testinfo[n].weight;
+            allcycles += (testinfo[n].cycles * 2) / testinfo[n].weight;
+        }
         ++n;
     }
 
@@ -497,21 +595,26 @@ void tests (void)
     revers(0);
     n = 0;
     while (testinfo[n].generator) {
-        printinfo(n, 0);
+        testinfo[n].result = 0;
+        if (((cpu_type == testinfo[n].cpu_type) || (testinfo[n].cpu_type == CPU_6502)) && (ram_banks >= testinfo[n].ram_banks)) {
+            printinfo(n, 0);
+        }
         ++n;
     }
 
     while(1) {
         n = 0;
         while (testinfo[n].generator) {
-            gotoxy(39,n + 2); cputc('*');
-            teststart();
-            testinfo[n].generator();
-            testend();
-            res = (0xffff - 29) - dotest();;
-            testinfo[n].result = res;
-            printrating();
-            printinfo(n, res);
+            if (((cpu_type == testinfo[n].cpu_type) || (testinfo[n].cpu_type == CPU_6502)) && (ram_banks >= testinfo[n].ram_banks)) {
+                gotoxy(39,n + 1); cputc('*');
+                teststart();
+                testinfo[n].generator();
+                testend();
+                res = (0xffff - 29) - dotest();
+                testinfo[n].result = res;
+                printrating();
+                printinfo(n, res);
+            }
             ++n;
             if (kbhit()) {
                 break;
@@ -532,13 +635,17 @@ void menu (void)
     unsigned char ch;
     clrscr();
     revers(1);          //1234567890123456789012345678901234567890
-    gotoxy(0,0); cprintf("                        SynthMark64 v0.1");
+    gotoxy(0,0); cprintf("                        SynthMark64 v0.2");
+    gotoxy(0,24); cprintf("CPU %s, RAM %5d KB (%3d BANKS) %s",
+        cpu_type == CPU_65816 ? "65816" : cpu_type == CPU_65C02 ? "65C02" : "6502 ",
+        ram_banks * 64, ram_banks, vic_pal ? "PAL " : "NTSC");
     revers(0);
     while (1) {
         gotoxy(1,2); cprintf("[F1] disable screen during tests: %s", screenoff ? "yes" : "no ");
         gotoxy(1,4); cprintf("[F3] use C128 fast mode: %s", c128turbo ? "yes" : "no ");
         gotoxy(1,6); cprintf("[F5] use DTV fast mode(s): %s", dtvturbo ? "yes" : "no ");
-        gotoxy(1,8); cprintf("[RETURN] start benchmark");
+        gotoxy(1,8); cprintf("[F7] use SCPU optimization: %s", scpumode == 0 ? "default" : scpumode == 1 ? "none   " : "full   ");
+        gotoxy(1,10); cprintf("[RETURN] start benchmark");
         ch = cgetc();
         if (ch == 0x0d) {
             break;
@@ -557,6 +664,10 @@ void menu (void)
                 dtvturbo ^= 1;
                 break;
             case 0x88:
+                scpumode++;
+                if (scpumode > 2) {
+                    scpumode = 0;
+                }
                 break;
         }
     }
@@ -565,8 +676,20 @@ void menu (void)
     }
 }
 
+void check_ram_banks (void)
+{
+    if (cpu_type == CPU_65816) {
+        set_ram_banks();
+    } else {
+        ram_banks = 1;
+    }
+}
+
 void main (void)
 {
+    cpu_type = getcpu();
+    set_vic_pal();
+    check_ram_banks();
     fixscreen();
     while (1) {
         menu();
