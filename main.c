@@ -12,8 +12,16 @@ unsigned char vic_pal = 0;
 unsigned char screenoff = 0;
 unsigned char dtvturbo = 0;
 unsigned char c128turbo = 0;
+unsigned char c65turbo = 0;
+unsigned char m65turbo = 0;
 unsigned char scpumode = 1; // default, none, full
 unsigned char *ptr;
+
+void fastcall m65write32(unsigned char v);
+unsigned char m65read32(void);
+
+int count_cpu_names=9;
+char *cpu_names[]={"6502 ","65C02","65816","4510 ","65SC*","65CE*","HUC6*","2A0X ","45GS*"};
 
 void teststart(void)
 {
@@ -51,6 +59,64 @@ extern void dtvturbooff(void);
 extern void set_vic_pal(void);
 extern void set_ram_banks(void);
 
+/* Work out how much RAM a MEGA65 has.
+   We have to add up two types of RAM:
+   1. The primary fast/chip memory; and
+   2. The optional expansion memory.
+
+   For now, we will just count the main memory.
+
+   Basically try writing a value to $xx00FF and see if
+   it sticks, and stop when it stops working (but make sure
+   to enable writing to the "ROM" area first.
+*/
+
+unsigned char read_value;
+unsigned char m65zpsave[5]; 
+void set_m65_ram_banks(void)
+{
+   unsigned char n,bank_ok;
+   // Save $FB-$FF
+   for(n=0;n<5;n++) m65zpsave[n]=*(unsigned char *)(0xfb+n);
+
+#if 1
+   // Remove write protection of 128KB ROM area
+   // XXX - This hypervisor call TOGGLES write protection, so we 
+   // should actually check the result before proceeding.
+   __asm__("lda #$47");
+   __asm__("sta $d02f");
+   __asm__("lda #$53");
+   __asm__("sta $d02f");
+   __asm__("lda #$70");
+   __asm__("sta $d640");
+   __asm__("nop");        // work around M65 bug sometimes eating byte after hypervisor call
+   __asm__("sta $d02f");
+#endif
+
+   // Set pointer to $00000000 to begin with
+   (*(unsigned long *)0xFB)=0x00000000L;
+
+   // Now try memory banks
+   for (n=0;n!=255;n++) {
+	// Set bits 16 - 23 to bank number
+	(*(unsigned char *)0xfd)=n;
+	// now do the read
+        read_value=m65read32();
+	read_value^=0xff;
+	m65write32(read_value);
+	if (m65read32()!=read_value) bank_ok=0; else bank_ok=1;
+	read_value^=0xff;
+	m65write32(read_value);
+	if (!bank_ok) break;
+   }
+
+   if (n) ram_banks=n;
+
+   // restore ZP area
+   for(n=0;n<5;n++) *(unsigned char *)(0xfb+n)=m65zpsave[n];
+
+}
+
 unsigned int dotest(void)
 {
     static unsigned int res;
@@ -69,6 +135,31 @@ unsigned int dotest(void)
     if (c128turbo) {
         asm("ldy #$01");
         asm("sty $d030");
+    }
+    
+    if (cpu_type == CPU_45GS02) {
+	if (m65turbo) {
+	   asm("ldy #65");
+           asm("sty $0");
+        } else {
+	   asm("ldy #64");
+           asm("sty $0");
+        }
+    }
+
+    if (cpu_type == CPU_45GS02 || cpu_type == CPU_4510) {
+	asm ("lda #$a5");
+	asm ("ldy #$96");
+	asm ("sta $d02f");
+	asm ("sty $d02f");
+	if (c65turbo) {
+	   asm("ldy #$40");
+           asm("sty $d031");
+        } else {
+	   asm("ldy #$00");
+           asm("sty $d031");
+        }
+	asm ("sty $d02f");
     }
 
     if (cpu_type == CPU_65816) {
@@ -637,15 +728,17 @@ void menu (void)
     revers(1);          //1234567890123456789012345678901234567890
     gotoxy(0,0); cprintf("                        SynthMark64 v0.2");
     gotoxy(0,24); cprintf("CPU %s, RAM %5d KB (%3d BANKS) %s",
-        cpu_type == CPU_65816 ? "65816" : cpu_type == CPU_65C02 ? "65C02" : "6502 ",
+        cpu_type < count_cpu_names ? cpu_names[cpu_type] : "?????",
         ram_banks * 64, ram_banks, vic_pal ? "PAL " : "NTSC");
     revers(0);
     while (1) {
         gotoxy(1,2); cprintf("[F1] disable screen during tests: %s", screenoff ? "yes" : "no ");
         gotoxy(1,4); cprintf("[F3] use C128 fast mode: %s", c128turbo ? "yes" : "no ");
-        gotoxy(1,6); cprintf("[F5] use DTV fast mode(s): %s", dtvturbo ? "yes" : "no ");
-        gotoxy(1,8); cprintf("[F7] use SCPU optimization: %s", scpumode == 0 ? "default" : scpumode == 1 ? "none   " : "full   ");
-        gotoxy(1,10); cprintf("[RETURN] start benchmark");
+        gotoxy(1,6); cprintf("[F4] use C65 fast mode: %s", c65turbo ? "yes" : "no ");
+        gotoxy(1,8); cprintf("[F5] use DTV fast mode(s): %s", dtvturbo ? "yes" : "no ");
+        gotoxy(1,10); cprintf("[F7] use SCPU optimization: %s", scpumode == 0 ? "default" : scpumode == 1 ? "none   " : "full   ");
+        gotoxy(1,12); cprintf("[F8] use MEGA65 fast mode: %s", m65turbo ? "yes" : "no ");
+        gotoxy(1,14); cprintf("[RETURN] start benchmark");
         ch = cgetc();
         if (ch == 0x0d) {
             break;
@@ -660,6 +753,9 @@ void menu (void)
             case 0x86:
                 c128turbo ^= 1;
                 break;
+            case 0x8a:
+                c65turbo ^= 1;
+                break;
             case 0x87:
                 dtvturbo ^= 1;
                 break;
@@ -669,6 +765,9 @@ void menu (void)
                     scpumode = 0;
                 }
                 break;
+	    case 0x8c:
+		m65turbo ^= 1;
+		break;
         }
     }
     while (kbhit()) {
@@ -680,6 +779,11 @@ void check_ram_banks (void)
 {
     if (cpu_type == CPU_65816) {
         set_ram_banks();
+    } else if (cpu_type == CPU_4510) {
+	// Assume C65
+	ram_banks = 2;
+    } else if (cpu_type == CPU_45GS02) {
+	set_m65_ram_banks();
     } else {
         ram_banks = 1;
     }
