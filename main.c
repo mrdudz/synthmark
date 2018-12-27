@@ -12,6 +12,7 @@ unsigned char vic_pal = 0;
 unsigned char screenoff = 0;
 unsigned char dtvturbo = 0;
 unsigned char c128turbo = 0;
+unsigned char m65turbo = 0;
 unsigned char scpumode = 1; // default, none, full
 unsigned char *ptr;
 
@@ -72,6 +73,16 @@ unsigned int dotest(void)
     if (c128turbo) {
         asm("ldy #$01");
         asm("sty $d030");
+    }
+    
+    if (cpu_type == CPU_45GS02) {
+	if (m65turbo) {
+	   asm("ldy #65");
+           asm("sty $0");
+        } else {
+	   asm("ldy #64");
+           asm("sty $0");
+        }
     }
 
     if (cpu_type == CPU_65816) {
@@ -648,7 +659,8 @@ void menu (void)
         gotoxy(1,4); cprintf("[F3] use C128 fast mode: %s", c128turbo ? "yes" : "no ");
         gotoxy(1,6); cprintf("[F5] use DTV fast mode(s): %s", dtvturbo ? "yes" : "no ");
         gotoxy(1,8); cprintf("[F7] use SCPU optimization: %s", scpumode == 0 ? "default" : scpumode == 1 ? "none   " : "full   ");
-        gotoxy(1,10); cprintf("[RETURN] start benchmark");
+        gotoxy(1,10); cprintf("[F8] use MEGA65 fast mode: %s", m65turbo ? "yes" : "no ");
+        gotoxy(1,12); cprintf("[RETURN] start benchmark");
         ch = cgetc();
         if (ch == 0x0d) {
             break;
@@ -672,6 +684,9 @@ void menu (void)
                     scpumode = 0;
                 }
                 break;
+	    case 0x8c:
+		m65turbo ^= 1;
+		break;
         }
     }
     while (kbhit()) {
