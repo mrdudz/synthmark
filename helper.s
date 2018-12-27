@@ -1,4 +1,19 @@
 
+	.export _m65read32,_m65write32
+
+_m65read32:
+	nop
+	.byte $b2, $fb ; lda ($fb),z
+	ldx #$00
+	rts
+
+_m65write32:
+	nop
+	.byte $92,$fb  ; sta ($fb),z
+	lda #$00
+	ldx #$00
+	rts
+
         .export _loadzpage, _savezpage
 _loadzpage:
         ldx #2

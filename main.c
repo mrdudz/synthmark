@@ -17,6 +17,9 @@ unsigned char m65turbo = 0;
 unsigned char scpumode = 1; // default, none, full
 unsigned char *ptr;
 
+void fastcall m65write32(unsigned char v);
+unsigned char m65read32(void);
+
 int count_cpu_names=9;
 char *cpu_names[]={"6502 ","65C02","65816","4510 ","65SC*","65CE*","HUC6*","2A0X ","45GS*"};
 
@@ -55,6 +58,50 @@ extern void dtvturbooff(void);
 
 extern void set_vic_pal(void);
 extern void set_ram_banks(void);
+
+/* Work out how much RAM a MEGA65 has.
+   We have to add up two types of RAM:
+   1. The primary fast/chip memory; and
+   2. The optional expansion memory.
+
+   For now, we will just count the main memory.
+
+   Basically try writing a value to $xx00FF and see if
+   it sticks, and stop when it stops working (but make sure
+   to enable writing to the "ROM" area first.
+*/
+
+unsigned char read_value;
+unsigned char m65zpsave[5]; 
+void set_m65_ram_banks(void)
+{
+   unsigned char n,bank_ok;
+   // Save $FB-$FF
+   for(n=0;n<5;n++) m65zpsave[n]=*(unsigned char *)(0xfb+n);
+
+   // Set pointer to $00000000 to begin with
+   (*(unsigned long *)0xFB)=0x00000000L;
+
+   // Now try memory banks
+   for (n=0;n<255;n++) {
+	// Set bits 16 - 23 to bank number
+	(*(unsigned char *)0xfd)=n;
+	// now do the read
+        read_value=m65read32();
+	read_value^=0xff;
+	m65write32(read_value);
+	if (m65read32()!=read_value) bank_ok=0; else bank_ok=1;
+	read_value^=0xff;
+	m65write32(read_value);
+	if (!bank_ok) break;
+   }
+
+   if (n) ram_banks=n;
+
+   // restore ZP area
+   for(n=0;n<5;n++) *(unsigned char *)(0xfb+n)=m65zpsave[n];
+
+}
 
 unsigned int dotest(void)
 {
@@ -718,6 +765,11 @@ void check_ram_banks (void)
 {
     if (cpu_type == CPU_65816) {
         set_ram_banks();
+    } else if (cpu_type == CPU_4510) {
+	// Assume C65
+	ram_banks = 2;
+    } else if (cpu_type == CPU_45GS02) {
+	set_m65_ram_banks();
     } else {
         ram_banks = 1;
     }
