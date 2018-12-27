@@ -12,6 +12,7 @@ unsigned char vic_pal = 0;
 unsigned char screenoff = 0;
 unsigned char dtvturbo = 0;
 unsigned char c128turbo = 0;
+unsigned char c65turbo = 0;
 unsigned char m65turbo = 0;
 unsigned char scpumode = 1; // default, none, full
 unsigned char *ptr;
@@ -83,6 +84,21 @@ unsigned int dotest(void)
 	   asm("ldy #64");
            asm("sty $0");
         }
+    }
+
+    if (cpu_type == CPU_45GS02 || cpu_type == CPU_4510) {
+	asm ("lda #$a5");
+	asm ("ldy #$96");
+	asm ("sta $d02f");
+	asm ("sty $d02f");
+	if (c65turbo) {
+	   asm("ldy #$40");
+           asm("sty $d031");
+        } else {
+	   asm("ldy #$00");
+           asm("sty $d031");
+        }
+	asm ("sty $d02f");
     }
 
     if (cpu_type == CPU_65816) {
@@ -657,10 +673,11 @@ void menu (void)
     while (1) {
         gotoxy(1,2); cprintf("[F1] disable screen during tests: %s", screenoff ? "yes" : "no ");
         gotoxy(1,4); cprintf("[F3] use C128 fast mode: %s", c128turbo ? "yes" : "no ");
-        gotoxy(1,6); cprintf("[F5] use DTV fast mode(s): %s", dtvturbo ? "yes" : "no ");
-        gotoxy(1,8); cprintf("[F7] use SCPU optimization: %s", scpumode == 0 ? "default" : scpumode == 1 ? "none   " : "full   ");
-        gotoxy(1,10); cprintf("[F8] use MEGA65 fast mode: %s", m65turbo ? "yes" : "no ");
-        gotoxy(1,12); cprintf("[RETURN] start benchmark");
+        gotoxy(1,6); cprintf("[F4] use C65 fast mode: %s", c65turbo ? "yes" : "no ");
+        gotoxy(1,8); cprintf("[F5] use DTV fast mode(s): %s", dtvturbo ? "yes" : "no ");
+        gotoxy(1,10); cprintf("[F7] use SCPU optimization: %s", scpumode == 0 ? "default" : scpumode == 1 ? "none   " : "full   ");
+        gotoxy(1,12); cprintf("[F8] use MEGA65 fast mode: %s", m65turbo ? "yes" : "no ");
+        gotoxy(1,14); cprintf("[RETURN] start benchmark");
         ch = cgetc();
         if (ch == 0x0d) {
             break;
@@ -674,6 +691,9 @@ void menu (void)
                 break;
             case 0x86:
                 c128turbo ^= 1;
+                break;
+            case 0x8a:
+                c65turbo ^= 1;
                 break;
             case 0x87:
                 dtvturbo ^= 1;
