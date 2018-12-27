@@ -79,11 +79,25 @@ void set_m65_ram_banks(void)
    // Save $FB-$FF
    for(n=0;n<5;n++) m65zpsave[n]=*(unsigned char *)(0xfb+n);
 
+#if 1
+   // Remove write protection of 128KB ROM area
+   // XXX - This hypervisor call TOGGLES write protection, so we 
+   // should actually check the result before proceeding.
+   __asm__("lda #$47");
+   __asm__("sta $d02f");
+   __asm__("lda #$53");
+   __asm__("sta $d02f");
+   __asm__("lda #$70");
+   __asm__("sta $d640");
+   __asm__("nop");        // work around M65 bug sometimes eating byte after hypervisor call
+   __asm__("sta $d02f");
+#endif
+
    // Set pointer to $00000000 to begin with
    (*(unsigned long *)0xFB)=0x00000000L;
 
    // Now try memory banks
-   for (n=0;n<255;n++) {
+   for (n=0;n!=255;n++) {
 	// Set bits 16 - 23 to bank number
 	(*(unsigned char *)0xfd)=n;
 	// now do the read
