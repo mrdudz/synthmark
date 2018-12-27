@@ -15,6 +15,9 @@ unsigned char c128turbo = 0;
 unsigned char scpumode = 1; // default, none, full
 unsigned char *ptr;
 
+int count_cpu_names=9;
+char *cpu_names[]={"6502 ","65C02","65816","4510 ","65SC*","65CE*","HUC6*","2A0X ","45GS*"};
+
 void teststart(void)
 {
     ptr = (unsigned char*)0xe000;
@@ -637,7 +640,7 @@ void menu (void)
     revers(1);          //1234567890123456789012345678901234567890
     gotoxy(0,0); cprintf("                        SynthMark64 v0.2");
     gotoxy(0,24); cprintf("CPU %s, RAM %5d KB (%3d BANKS) %s",
-        cpu_type == CPU_65816 ? "65816" : cpu_type == CPU_65C02 ? "65C02" : "6502 ",
+        cpu_type < count_cpu_names ? cpu_names[cpu_type] : "?????",
         ram_banks * 64, ram_banks, vic_pal ? "PAL " : "NTSC");
     revers(0);
     while (1) {
